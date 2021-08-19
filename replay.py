@@ -7,6 +7,7 @@ FIRST_MESSAGE = None
 
 MPV_PATH = r"mpv" # Write your full MPV path here if it's not in PATH
 SMOOTH_CHAT = True # Buffers a second of chat to feed it out smoothly instead of in big chunks
+HIDE_USERNAMES = True # Helps unclutter the chat and make use of horizontal room
 
 class MPV: # Inspired by the Syncplay source for communicating with MPV
     def __init__(self, exe_path, media=None):
@@ -24,6 +25,7 @@ class MPV: # Inspired by the Syncplay source for communicating with MPV
         else:
             raise ValueError("MPV failed to start")
 
+        time.sleep(0.1) # Seems to solve a semi-random OSError
         self.pipe = open(self.pipe_path, "rb+", buffering=0)
 
     def write(self, command):
@@ -80,7 +82,7 @@ class Log:
             message = self.buffer.pop(0)[1]
             if self.seeking: continue
             if ":" not in message: continue # Superchat or something
-            message = re.sub(r"^.*: ", "", message)
+            if HIDE_USERNAMES: message = re.sub(r"^.*: ", "", message)
             out.append(message)
         self.seeking = False
         return out
@@ -92,7 +94,7 @@ def get_messages(queue, video, chat_log, first_message):
     mpv = MPV(MPV_PATH, video)
     global playing # *Should* be thread safe enough
 
-    while True:
+    while not die:
         input = mpv.read()
         if input.get("event") == "property-change" and "data" in input:
             playing = True
@@ -126,22 +128,28 @@ if not os.path.exists(chat_log):
     exit()
 
 playing = True
+die = False
 message_queue = queue.Queue()
 worker = threading.Thread(target=get_messages, args=(message_queue, video, chat_log, FIRST_MESSAGE))
 worker.setDaemon(True)
 worker.start()
 while worker.is_alive():
-    if playing:
-        try:
-            message = message_queue.get(block=False)
-            message_queue.task_done()
-            print(message)
-            if SMOOTH_CHAT:
-                qsize = message_queue.qsize()
-                if qsize > 0: time.sleep(1/qsize)
-                else: time.sleep(1)
-        except queue.Empty:
-            if SMOOTH_CHAT: time.sleep(1)
-            else: time.sleep(0.017)
-    else:
-        time.sleep(0.017)
+    try:
+        if playing:
+            try:
+                message = message_queue.get(block=False)
+                message_queue.task_done()
+                print(message)
+                if SMOOTH_CHAT:
+                    qsize = message_queue.qsize()
+                    if qsize > 0: time.sleep(1/qsize)
+                    else: time.sleep(1)
+            except queue.Empty:
+                if SMOOTH_CHAT: time.sleep(1)
+                else: time.sleep(0.017)
+        else:
+            time.sleep(0.017)
+    except KeyboardInterrupt:
+        break
+die = True
+worker.join(1)
