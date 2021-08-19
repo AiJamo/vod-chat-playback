@@ -1,5 +1,5 @@
 # vod-chat-playback
-Play back archived streams with chat. Requires Python 3.
+Play back archived streams with chat in a seperate window. Requires Python 3.
 
 Currently only supports MPV and chat log files in the format `%Y-%m-%d %H:%M:%S | Username: Message\n`
 
