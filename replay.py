@@ -1,13 +1,14 @@
-import subprocess, time, os, uuid, atexit, json, datetime, re, threading, queue, sys
+import subprocess, time, os, uuid, atexit, json, datetime, re, threading, queue, sys, io
 
+FIRST_MESSAGE = None
 # Used for synchronizing the chat log to the video in the case that there is pre-stream in the log
 # Opening the log in a text editor and finding the guy saying "refresh" seems to work if you subtract a few seconds to account for his reaction time
 # If there is no pre-stream chat in the log you can keep this None, otherwise something like FIRST_MESSAGE = "2021-08-17 20:06:20"
-FIRST_MESSAGE = None
 
 MPV_PATH = r"mpv" # Write your full MPV path here if it's not in PATH
 SMOOTH_CHAT = True # Buffers a second of chat to feed it out smoothly instead of in big chunks
 HIDE_USERNAMES = True # Helps unclutter the chat and make use of horizontal room
+BUFFER_LOGFILE = True # Big responsiveness gains and much more efficient disk access. Only disable if you can't afford the memory to load the entire chat log at once.
 
 class MPV: # Used the Syncplay source as a reference for how to communicate with MPV
     def __init__(self, exe_path, media=None):
@@ -50,9 +51,16 @@ class MPV: # Used the Syncplay source as a reference for how to communicate with
 
 class Log:
     def __init__(self, path, first=None):
-        self.log_file = open(path, "r", encoding="utf8")
+        if BUFFER_LOGFILE:
+            self.log_file = io.StringIO()
+            with open(path, "r", encoding="utf8") as log_file:
+                self.log_file.write(log_file.read())
+            self.log_file.seek(0)
+        else:
+            self.log_file = open(path, "r", encoding="utf8")
         self.last_offset = 0
         self.last_start = 0
+        self.next_at = None
 
         if first is None:
             self.seeking = False
@@ -63,6 +71,7 @@ class Log:
 
     def seek(self):
         self.seeking = True
+        self.next_at = None
 
     def next_message(self):
         self.last_start = self.log_file.tell()
@@ -82,12 +91,15 @@ class Log:
         if self.seeking and target_offset < self.last_offset:
             self.log_file.seek(0) # Rewind the file if the skip was backwards
 
+        if self.next_at is not None and self.next_at > target_offset: return [] # We know when the next message should appear and it is not now
+
         out = []
         while True:
             next_message = self.next_message()
             if next_message is None: break # Out of log no message could be read
             timestamp, message = next_message
             if timestamp > target_offset: # Message is from the future
+                self.next_at = timestamp
                 self.rewind() # Put it back where it came from
                 break
             if self.seeking: # Prevents output of any of the chat messages it goes through while catching up to a seek
