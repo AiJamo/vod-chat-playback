@@ -2,14 +2,14 @@ import subprocess, time, os, uuid, atexit, json, datetime, re, threading, queue,
 
 # Used for synchronizing the chat log to the video in the case that there is pre-stream in the log
 # Opening the log in a text editor and finding the guy saying "refresh" seems to work if you subtract a few seconds to account for his reaction time
-# If there is no pre-stream chat in the log you can keep this None, otherwise something like FIRST_MESSAGE = "2021-08-15 20:02:45"
+# If there is no pre-stream chat in the log you can keep this None, otherwise something like FIRST_MESSAGE = "2021-08-17 20:06:20"
 FIRST_MESSAGE = None
 
 MPV_PATH = r"mpv" # Write your full MPV path here if it's not in PATH
 SMOOTH_CHAT = True # Buffers a second of chat to feed it out smoothly instead of in big chunks
 HIDE_USERNAMES = True # Helps unclutter the chat and make use of horizontal room
 
-class MPV: # Inspired by the Syncplay source for communicating with MPV
+class MPV: # Used the Syncplay source as a reference for how to communicate with MPV
     def __init__(self, exe_path, media=None):
         self.pipe_path = "mpvpipe-{}".format(uuid.uuid4().hex)
         if os.name == "nt": self.pipe_path = "\\\\.\\pipe\\" + self.pipe_path
@@ -51,44 +51,58 @@ class MPV: # Inspired by the Syncplay source for communicating with MPV
 class Log:
     def __init__(self, path, first=None):
         self.log_file = open(path, "r", encoding="utf8")
+        self.last_offset = 0
+        self.last_start = 0
+
         if first is None:
             self.seeking = False
             self.first = None
         else:
             self.first = first
             self.seeking = True
-        self.buffer = []
-        self.load_buffer()
 
     def seek(self):
-        self.log_file.seek(0)
         self.seeking = True
-        self.buffer = []
-        self.load_buffer()
 
-    def load_buffer(self):
-        for _ in range(10):
-            line = self.log_file.readline().strip()
-            if "|" in line:
-                offset = time.mktime(datetime.datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S").timetuple())
-                if self.first is None: self.first = offset
-                offset = offset - self.first
-                self.buffer.append((offset, line[22:]))
+    def next_message(self):
+        self.last_start = self.log_file.tell()
+        line = self.log_file.readline().strip()
+        if self.log_file.tell() == self.last_start: return None # Out of log
+        if "|" not in line: return self.next_message()
+
+        offset = time.mktime(datetime.datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S").timetuple())
+        if self.first is None: self.first = offset
+        offset = offset - self.first
+        return (offset, line[22:])
+
+    def rewind(self):
+        self.log_file.seek(self.last_start)
 
     def new_messages(self, target_offset):
+        if self.seeking and target_offset < self.last_offset:
+            self.log_file.seek(0) # Rewind the file if the skip was backwards
+
         out = []
-        while self.buffer[0][0] <= target_offset:
-            if len(self.buffer) < 5: self.load_buffer()
-            message = self.buffer.pop(0)[1]
-            if self.seeking: continue
+        while True:
+            next_message = self.next_message()
+            if next_message is None: break # Out of log no message could be read
+            timestamp, message = next_message
+            if timestamp > target_offset: # Message is from the future
+                self.rewind() # Put it back where it came from
+                break
+            if self.seeking: # Prevents output of any of the chat messages it goes through while catching up to a seek
+                if SMOOTH_CHAT and target_offset - timestamp <= 1: self.seeking = False # Stop seeking a second early to fill up the buffer if smooth chatting
+                else: continue
             if ":" not in message: continue # Superchat or something
             if HIDE_USERNAMES: message = re.sub(r"^.*: ", "", message)
             out.append(message)
+
         self.seeking = False
+        self.last_offset = target_offset
         return out
 
 def get_messages(queue, video, chat_log, first_message):
-    if first_message is not None: first = time.mktime(datetime.datetime.strptime(first_message, "%Y-%m-%d %H:%M:%S").timetuple())
+    if first_message is not None: first = time.mktime(datetime.datetime.strptime(first_message[:19], "%Y-%m-%d %H:%M:%S").timetuple())
     else: first = None
     log = Log(chat_log, first)
     mpv = MPV(MPV_PATH, video)
@@ -96,7 +110,7 @@ def get_messages(queue, video, chat_log, first_message):
 
     while not die:
         input = mpv.read()
-        if input.get("event") == "property-change" and "data" in input:
+        if input.get("event") == "property-change" and input.get("name") == "playback-time" and "data" in input:
             playing = True
             offset = input.get("data")
             for message in log.new_messages(offset):
@@ -107,7 +121,7 @@ def get_messages(queue, video, chat_log, first_message):
             log.seek()
         elif input.get("event") == "end-file":
             break
-        elif input.get("event") == "file-loaded":
+        elif input.get("event") == "playback-restart":
             mpv.write(b'{ "command": ["observe_property", 1, "playback-time"] }\n')
         elif input.get("event") == "pause":
             playing = False
