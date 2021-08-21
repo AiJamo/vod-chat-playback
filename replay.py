@@ -18,7 +18,7 @@ class MPV: # Used the Syncplay source as a reference for how to communicate with
         else: self.process = subprocess.Popen([exe_path, media, "--input-ipc-server={}".format(self.pipe_path)])
         atexit.register(self.destroy)
 
-        for _ in range(30):
+        for _ in range(100):
             time.sleep(0.1)
             self.process.poll()
             if os.path.exists(self.pipe_path):
@@ -27,18 +27,14 @@ class MPV: # Used the Syncplay source as a reference for how to communicate with
             raise ValueError("MPV failed to start")
 
         time.sleep(0.1) # Seems to solve a semi-random OSError
-        self.pipe = open(self.pipe_path, "rb+", buffering=0)
+        self.pipe = open(self.pipe_path, "r+", encoding="utf8")
 
     def write(self, command):
         self.pipe.write(command)
+        self.pipe.flush()
 
     def read(self):
-        command = b""
-        cur = self.pipe.read(1)
-        while cur != b"\n":
-            command += cur
-            cur = self.pipe.read(1)
-        return json.loads(command.decode("utf8"))
+        return json.loads(self.pipe.readline().strip())
 
     def destroy(self):
         self.process.terminate()
@@ -123,7 +119,7 @@ def get_messages(queue, video, chat_log, first_message):
     while not die:
         input = mpv.read()
         if input.get("event") == "property-change" and input.get("name") == "playback-time" and "data" in input:
-            playing = True
+            playing = True # Just to make sure it doesn't get stuck in a false pause by missing the "unpause" event
             offset = input.get("data")
             for message in log.new_messages(offset):
                 queue.put(message)
@@ -134,7 +130,7 @@ def get_messages(queue, video, chat_log, first_message):
         elif input.get("event") == "end-file":
             break
         elif input.get("event") == "playback-restart":
-            mpv.write(b'{ "command": ["observe_property", 1, "playback-time"] }\n')
+            mpv.write('{ "command": ["observe_property", 1, "playback-time"] }\n')
         elif input.get("event") == "pause":
             playing = False
         elif input.get("event") == "unpause":
