@@ -97,7 +97,7 @@ class Log:
             else:
                 self.first = offset
         offset = offset - self.first
-        return (offset, line[22:])
+        return (offset, line.split("|")[1][1:])
 
     def rewind(self):
         self.log_file.seek(self.last_start)
@@ -106,9 +106,8 @@ class Log:
         if self.seeking and target_offset < self.last_offset:
             self.log_file.seek(0) # Rewind the file if the skip was backwards
 
-        if self.next_at is not None and self.next_at > target_offset: return [] # We know when the next message should appear and it is not now
+        if self.next_at is not None and self.next_at > target_offset: return # We know when the next message should appear and it is not now
 
-        out = []
         while True:
             next_message = self.next_message()
             if next_message is None: break # Out of log no message could be read
@@ -122,11 +121,10 @@ class Log:
                 else: continue
             if ":" not in message: continue # Superchat or something
             if HIDE_USERNAMES: message = re.sub(r"^.*: ", "", message)
-            out.append(message)
+            yield message
 
         self.seeking = False
         self.last_offset = target_offset
-        return out
 
 def get_messages(queue, video, chat_log, first_message):
     if first_message is not None: first = Log.extract_timestamp(first_message + " |").get("timestamp")
