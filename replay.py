@@ -129,7 +129,7 @@ class Log:
         return out
 
 def get_messages(queue, video, chat_log, first_message):
-    if first_message is not None: first = Log.extract_timestamp(first_message).get("timestamp")
+    if first_message is not None: first = Log.extract_timestamp(first_message + " |").get("timestamp")
     else: first = None
     log = Log(chat_log, first)
     mpv = MPV(MPV_PATH, video)
