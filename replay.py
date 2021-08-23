@@ -1,9 +1,10 @@
 import subprocess, time, os, uuid, atexit, json, datetime, re, threading, queue, sys, io
 
 FIRST_MESSAGE = None
-# Used for synchronizing the chat log to the video in the case that there is pre-stream in the log
+# Used for synchronizing the chat log to the video
+# If there is no pre-stream chat or if the log doesn't use full dates as timestamps, you can keep this None
+# Otherwise something like FIRST_MESSAGE = "2021-08-17 20:06:20" or FIRST_MESSAGE = "0:02" will set the time this script will treat as 00:00:00 on the video file
 # Opening the log in a text editor and finding the guy saying "refresh" seems to work if you subtract a few seconds to account for his reaction time
-# If there is no pre-stream chat in the log you can keep this None, otherwise something like FIRST_MESSAGE = "2021-08-17 20:06:20"
 
 MPV_PATH = r"mpv" # Write your full MPV path here if it's not in PATH
 SMOOTH_CHAT = True # Buffers a second of chat to feed it out smoothly instead of in big chunks
@@ -57,17 +58,31 @@ class Log:
         self.last_offset = 0
         self.last_start = 0
         self.next_at = None
-
-        if first is None:
-            self.seeking = False
-            self.first = None
-        else:
-            self.first = first
-            self.seeking = True
+        self.seeking = True
+        self.first = first
 
     def seek(self):
         self.seeking = True
         self.next_at = None
+
+    @staticmethod
+    def extract_timestamp(line):
+        try:
+            return {"timestamp": time.mktime(datetime.datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S").timetuple()), "absolute": False}
+        except ValueError:
+            time_string = line.split("|")[0][:-1]
+            multiplier = 1
+            if time_string[0] == "-":
+                multiplier = -1
+                time_string = time_string[1:]
+
+            if time_string.count(":") == 1:
+                minutes, seconds = time_string.split(":")
+                hours = 0
+            else:
+                hours, minutes, seconds = time_string.split(":")
+
+            return {"timestamp": multiplier * (int(seconds) + 60 * int(minutes) + 60 * 60 * int(hours)), "absolute": True}
 
     def next_message(self):
         self.last_start = self.log_file.tell()
@@ -75,8 +90,12 @@ class Log:
         if self.log_file.tell() == self.last_start: return None # Out of log
         if "|" not in line: return self.next_message()
 
-        offset = time.mktime(datetime.datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S").timetuple())
-        if self.first is None: self.first = offset
+        offset = self.extract_timestamp(line).get("timestamp")
+        if self.first is None:
+            if self.extract_timestamp(line).get("absolute"):
+                self.first = 0
+            else:
+                self.first = offset
         offset = offset - self.first
         return (offset, line[22:])
 
@@ -110,7 +129,7 @@ class Log:
         return out
 
 def get_messages(queue, video, chat_log, first_message):
-    if first_message is not None: first = time.mktime(datetime.datetime.strptime(first_message[:19], "%Y-%m-%d %H:%M:%S").timetuple())
+    if first_message is not None: first = Log.extract_timestamp(first_message).get("timestamp")
     else: first = None
     log = Log(chat_log, first)
     mpv = MPV(MPV_PATH, video)
