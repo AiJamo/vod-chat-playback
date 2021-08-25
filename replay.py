@@ -10,6 +10,12 @@ MPV_PATH = r"mpv" # Write your full MPV path here if it's not in PATH
 SMOOTH_CHAT = True # Buffers a second of chat to feed it out smoothly instead of in big chunks
 HIDE_USERNAMES = True # Helps unclutter the chat and make use of horizontal room
 BUFFER_LOGFILE = True # Big responsiveness gains and much more efficient disk access. Only disable if you can't afford the memory to load the entire chat log at once.
+TRANSLATE_EMOJIS = True # Translates things like :thumbs_up: to 👍 if the emoji package is installed (Enter 'pip3 install emoji' in a terminal)
+
+try:
+    import emoji
+except ModuleNotFoundError:
+    TRANSLATE_EMOJIS = False
 
 class MPV: # Used the Syncplay source as a reference for how to communicate with MPV
     def __init__(self, exe_path, media=None):
@@ -121,6 +127,7 @@ class Log:
                 else: continue
             if ":" not in message: continue # Superchat or something
             if HIDE_USERNAMES: message = re.sub(r"^.*: ", "", message)
+            if TRANSLATE_EMOJIS: message = emoji.emojize(message)
             yield message
 
         self.seeking = False
