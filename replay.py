@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import subprocess, time, os, uuid, atexit, json, datetime, re, threading, queue, sys, io
 
 FIRST_MESSAGE = None
