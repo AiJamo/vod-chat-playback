@@ -1,7 +1,9 @@
 # vod-chat-playback
 Play back archived streams with chat in a seperate window. Requires Python 3.
 
-Usage: `replay.py vod.mp4 vod.log`
+[Download](https://raw.githubusercontent.com/AiJamo/vod-chat-playback/main/replay.py) (You might have to right click and hit save)
+
+Usage: `replay.py vod.mp4 vod.log` 
 
 ![alt text](https://github.com/AiJamo/vod-chat-playback/raw/main/chat_replay.gif)
 
